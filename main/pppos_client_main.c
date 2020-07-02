@@ -22,7 +22,7 @@ static const char *TAG = "pppos_example";
 static EventGroupHandle_t event_group = NULL;
 static const int CONNECT_BIT = BIT0;
 static const int STOP_BIT = BIT1;
-static const int GOT_DATA_BIT = BIT2;
+//static const int GOT_DATA_BIT = BIT2;
 static const int SUBSCRIBED_BIT = BIT3;
 
 #if CONFIG_EXAMPLE_SEND_MSG
@@ -228,26 +228,23 @@ void app_main()
     xEventGroupWaitBits(event_group, SUBSCRIBED_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
 
     int test_count = 0;
-    while (test_count < 60) { // 60 messages will take roughly 10 minutes
+    while (test_count < 10) {
         int msg_id = esp_mqtt_client_publish(mqtt_client, "/topic/stackcare-pppos", "esp32-pppos", 0, 0, 0);
         ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
         vTaskDelay(10000 / portTICK_PERIOD_MS);
         test_count += 1;
     }
 
-    for (int i = 5; i >= 0; i--) {
-        printf("Restarting in %d seconds...\n", i);
-        fflush(stdout);
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
-    esp_restart();
-
-    xEventGroupWaitBits(event_group, GOT_DATA_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
+    // xEventGroupWaitBits(event_group, GOT_DATA_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
+    ESP_LOGI(TAG, "shutting down MQTT client...");
     esp_mqtt_client_destroy(mqtt_client);
 
     /* Exit PPP mode */
+    ESP_LOGI(TAG, "exiting modem PPP...");
     ESP_ERROR_CHECK(esp_modem_exit_ppp(dte));
+    ESP_LOGI(TAG, "waiting for the modem to stop...");
     xEventGroupWaitBits(event_group, STOP_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
+    ESP_LOGI(TAG, "modem stopped");
 #if CONFIG_EXAMPLE_SEND_MSG
     const char *message = "Welcome to ESP32!";
     ESP_ERROR_CHECK(example_send_message_text(dce, CONFIG_EXAMPLE_SEND_MSG_PEER_PHONE_NUMBER, message));
@@ -259,4 +256,11 @@ void app_main()
     ESP_LOGI(TAG, "Power down");
     ESP_ERROR_CHECK(dce->deinit(dce));
     ESP_ERROR_CHECK(dte->deinit(dte));
+
+    for (int i = 5; i >= 0; i--) {
+        printf("Restarting in %d seconds...\n", i);
+        fflush(stdout);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+    esp_restart();
 }
