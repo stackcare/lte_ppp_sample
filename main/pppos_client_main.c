@@ -12,9 +12,13 @@
 #include "tcpip_adapter.h"
 #include "mqtt_client.h"
 #include "esp_modem.h"
-#include "esp_log.h"
 #include "sim800.h"
 #include "bg96.h"
+
+#define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
+#include "esp_log.h"
+
+#include "ping_test.h"
 
 #define BROKER_URL "mqtt://mqtt.eclipse.org"
 
@@ -23,89 +27,7 @@ static EventGroupHandle_t event_group = NULL;
 static const int CONNECT_BIT = BIT0;
 static const int STOP_BIT = BIT1;
 //static const int GOT_DATA_BIT = BIT2;
-static const int SUBSCRIBED_BIT = BIT3;
-
-#if CONFIG_EXAMPLE_SEND_MSG
-/**
- * @brief This example will also show how to send short message using the infrastructure provided by esp modem library.
- * @note Not all modem support SMG.
- *
- */
-static esp_err_t example_default_handle(modem_dce_t *dce, const char *line)
-{
-    esp_err_t err = ESP_FAIL;
-    if (strstr(line, MODEM_RESULT_CODE_SUCCESS)) {
-        err = esp_modem_process_command_done(dce, MODEM_STATE_SUCCESS);
-    } else if (strstr(line, MODEM_RESULT_CODE_ERROR)) {
-        err = esp_modem_process_command_done(dce, MODEM_STATE_FAIL);
-    }
-    return err;
-}
-
-static esp_err_t example_handle_cmgs(modem_dce_t *dce, const char *line)
-{
-    esp_err_t err = ESP_FAIL;
-    if (strstr(line, MODEM_RESULT_CODE_SUCCESS)) {
-        err = esp_modem_process_command_done(dce, MODEM_STATE_SUCCESS);
-    } else if (strstr(line, MODEM_RESULT_CODE_ERROR)) {
-        err = esp_modem_process_command_done(dce, MODEM_STATE_FAIL);
-    } else if (!strncmp(line, "+CMGS", strlen("+CMGS"))) {
-        err = ESP_OK;
-    }
-    return err;
-}
-
-#define MODEM_SMS_MAX_LENGTH (128)
-#define MODEM_COMMAND_TIMEOUT_SMS_MS (120000)
-#define MODEM_PROMPT_TIMEOUT_MS (10)
-
-static esp_err_t example_send_message_text(modem_dce_t *dce, const char *phone_num, const char *text)
-{
-    modem_dte_t *dte = dce->dte;
-    dce->handle_line = example_default_handle;
-    /* Set text mode */
-    if (dte->send_cmd(dte, "AT+CMGF=1\r", MODEM_COMMAND_TIMEOUT_DEFAULT) != ESP_OK) {
-        ESP_LOGE(TAG, "send command failed");
-        goto err;
-    }
-    if (dce->state != MODEM_STATE_SUCCESS) {
-        ESP_LOGE(TAG, "set message format failed");
-        goto err;
-    }
-    ESP_LOGD(TAG, "set message format ok");
-    /* Specify character set */
-    dce->handle_line = example_default_handle;
-    if (dte->send_cmd(dte, "AT+CSCS=\"GSM\"\r", MODEM_COMMAND_TIMEOUT_DEFAULT) != ESP_OK) {
-        ESP_LOGE(TAG, "send command failed");
-        goto err;
-    }
-    if (dce->state != MODEM_STATE_SUCCESS) {
-        ESP_LOGE(TAG, "set character set failed");
-        goto err;
-    }
-    ESP_LOGD(TAG, "set character set ok");
-    /* send message */
-    char command[MODEM_SMS_MAX_LENGTH] = {0};
-    int length = snprintf(command, MODEM_SMS_MAX_LENGTH, "AT+CMGS=\"%s\"\r", phone_num);
-    /* set phone number and wait for "> " */
-    dte->send_wait(dte, command, length, "\r\n> ", MODEM_PROMPT_TIMEOUT_MS);
-    /* end with CTRL+Z */
-    snprintf(command, MODEM_SMS_MAX_LENGTH, "%s\x1A", text);
-    dce->handle_line = example_handle_cmgs;
-    if (dte->send_cmd(dte, command, MODEM_COMMAND_TIMEOUT_SMS_MS) != ESP_OK) {
-        ESP_LOGE(TAG, "send command failed");
-        goto err;
-    }
-    if (dce->state != MODEM_STATE_SUCCESS) {
-        ESP_LOGE(TAG, "send message failed");
-        goto err;
-    }
-    ESP_LOGD(TAG, "send message ok");
-    return ESP_OK;
-err:
-    return ESP_FAIL;
-}
-#endif
+//static const int SUBSCRIBED_BIT = BIT3;
 
 static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -126,10 +48,10 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
         xEventGroupSetBits(event_group, CONNECT_BIT);
         break;
     case MODEM_EVENT_PPP_DISCONNECT:
-        ESP_LOGI(TAG, "Modem Disconnect from PPP Server");
+        ESP_LOGW(TAG, "Modem Disconnect from PPP Server");
         break;
     case MODEM_EVENT_PPP_STOP:
-        ESP_LOGI(TAG, "Modem PPP Stopped");
+        ESP_LOGW(TAG, "Modem PPP Stopped");
         xEventGroupSetBits(event_group, STOP_BIT);
         break;
     case MODEM_EVENT_UNKNOWN:
@@ -140,6 +62,7 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
     }
 }
 
+/*
 static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
 {
     esp_mqtt_client_handle_t client = event->client;
@@ -180,6 +103,7 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
     }
     return ESP_OK;
 }
+*/
 
 void app_main()
 {
@@ -217,39 +141,44 @@ void app_main()
     esp_modem_setup_ppp(dte);
     /* Wait for IP address */
     xEventGroupWaitBits(event_group, CONNECT_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
+
     /* Config MQTT */
+    /*
     esp_mqtt_client_config_t mqtt_config = {
         .uri = BROKER_URL,
         .event_handle = mqtt_event_handler,
     };
     esp_mqtt_client_handle_t mqtt_client = esp_mqtt_client_init(&mqtt_config);
     esp_mqtt_client_start(mqtt_client);
-
     xEventGroupWaitBits(event_group, SUBSCRIBED_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
+    */
 
     int test_count = 0;
-    while (test_count < 10) {
-        int msg_id = esp_mqtt_client_publish(mqtt_client, "/topic/stackcare-pppos", "esp32-pppos", 0, 0, 0);
-        ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
-        vTaskDelay(10000 / portTICK_PERIOD_MS);
+    int max_test_count = 20;
+    int fail_count = 0;
+    int max_fail_count = 10;
+    while (test_count < max_test_count && fail_count < max_fail_count) {
+        // int msg_id = esp_mqtt_client_publish(mqtt_client, "/topic/stackcare-pppos", "esp32-pppos", 0, 0, 0);
+        // ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+
+        if (!run_ping_test()) {
+            fail_count += 1;
+        }
+
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
         test_count += 1;
     }
 
     // xEventGroupWaitBits(event_group, GOT_DATA_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
-    ESP_LOGI(TAG, "shutting down MQTT client...");
-    esp_mqtt_client_destroy(mqtt_client);
+    // ESP_LOGI(TAG, "shutting down MQTT client...");
+    // esp_mqtt_client_destroy(mqtt_client);
 
     /* Exit PPP mode */
     ESP_LOGI(TAG, "exiting modem PPP...");
     ESP_ERROR_CHECK(esp_modem_exit_ppp(dte));
-    ESP_LOGI(TAG, "waiting for the modem to stop...");
+    ESP_LOGI(TAG, "waiting for modem to stop...");
     xEventGroupWaitBits(event_group, STOP_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
     ESP_LOGI(TAG, "modem stopped");
-#if CONFIG_EXAMPLE_SEND_MSG
-    const char *message = "Welcome to ESP32!";
-    ESP_ERROR_CHECK(example_send_message_text(dce, CONFIG_EXAMPLE_SEND_MSG_PEER_PHONE_NUMBER, message));
-    ESP_LOGI(TAG, "Send send message [%s] ok", message);
-#endif
 
     /* Power down module */
     ESP_ERROR_CHECK(dce->power_down(dce));

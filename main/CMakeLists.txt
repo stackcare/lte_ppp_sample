@@ -1,2 +1,3 @@
 idf_component_register(SRCS "pppos_client_main.c"
+                            "ping_test.c"
                     INCLUDE_DIRS ".")
