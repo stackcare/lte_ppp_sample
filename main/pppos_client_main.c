@@ -19,6 +19,7 @@
 #include "esp_log.h"
 
 #include "ping_test.h"
+#include "http_test.h"
 
 #define BROKER_URL "mqtt://mqtt.eclipse.org"
 
@@ -26,8 +27,7 @@ static const char *TAG = "pppos_example";
 static EventGroupHandle_t event_group = NULL;
 static const int CONNECT_BIT = BIT0;
 static const int STOP_BIT = BIT1;
-//static const int GOT_DATA_BIT = BIT2;
-//static const int SUBSCRIBED_BIT = BIT3;
+static const int SUBSCRIBED_BIT = BIT3;
 
 static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -62,7 +62,6 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
     }
 }
 
-/*
 static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
 {
     esp_mqtt_client_handle_t client = event->client;
@@ -92,7 +91,6 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
         ESP_LOGI(TAG, "MQTT_EVENT_DATA");
         printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
         printf("DATA=%.*s\r\n", event->data_len, event->data);
-        //xEventGroupSetBits(event_group, GOT_DATA_BIT);
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
@@ -103,7 +101,6 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
     }
     return ESP_OK;
 }
-*/
 
 void app_main()
 {
@@ -143,7 +140,6 @@ void app_main()
     xEventGroupWaitBits(event_group, CONNECT_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
 
     /* Config MQTT */
-    /*
     esp_mqtt_client_config_t mqtt_config = {
         .uri = BROKER_URL,
         .event_handle = mqtt_event_handler,
@@ -151,27 +147,37 @@ void app_main()
     esp_mqtt_client_handle_t mqtt_client = esp_mqtt_client_init(&mqtt_config);
     esp_mqtt_client_start(mqtt_client);
     xEventGroupWaitBits(event_group, SUBSCRIBED_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
-    */
+
+    bool do_ping_test = true;
+    bool do_mqtt_test = true;
+    bool do_http_test = true;
 
     int test_count = 0;
     int max_test_count = 20;
     int fail_count = 0;
     int max_fail_count = 10;
     while (test_count < max_test_count && fail_count < max_fail_count) {
-        // int msg_id = esp_mqtt_client_publish(mqtt_client, "/topic/stackcare-pppos", "esp32-pppos", 0, 0, 0);
-        // ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+        if (do_ping_test) {
+            if (!run_ping_test()) {
+                fail_count += 1;
+            }
+        }
 
-        if (!run_ping_test()) {
-            fail_count += 1;
+        if (do_mqtt_test) {
+            int msg_id = esp_mqtt_client_publish(mqtt_client, "/topic/stackcare-pppos", "esp32-pppos", 0, 0, 0);
+            ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+        }
+
+        if (do_http_test) {
+            run_http_test();
         }
 
         vTaskDelay(1000 / portTICK_PERIOD_MS);
         test_count += 1;
     }
 
-    // xEventGroupWaitBits(event_group, GOT_DATA_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
-    // ESP_LOGI(TAG, "shutting down MQTT client...");
-    // esp_mqtt_client_destroy(mqtt_client);
+    ESP_LOGI(TAG, "shutting down MQTT client...");
+    esp_mqtt_client_destroy(mqtt_client);
 
     /* Exit PPP mode */
     ESP_LOGI(TAG, "exiting modem PPP...");
